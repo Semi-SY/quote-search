@@ -1,0 +1,13 @@
+# Render Blueprint — 一键部署台词检索
+# 参考: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: quote-search
+    runtime: docker
+    # Render 默认 $PORT=10000，Dockerfile 里已经 CMD sh -c 'uvicorn ... --port ${PORT}'
+    # healthcheck 也用 ${PORT}
+    region: ohio          # 美国东部免费区（国内访问稍慢但能接受）
+    plan: free            # 免费 Micro 实例，750 小时/月
+    autoDeploy: true      # git push 自动触发 rebuild
+    healthCheckPath: /api/health
+    # 无磁盘持久化 —— SQLite FTS5 构建期已经进镜像了，运行期只读
