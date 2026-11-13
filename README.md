@@ -76,5 +76,5 @@ Render 检测到 push 后自动 rebuild + redeploy。
 
 ## 素材与许可
 
-Footage: [Tears of Steel](https://mango.blender.org/) © Blender Foundation | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)
-Footage: [Sintel](https://durian.blender.org/) © Blender Foundation | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)
+Footage: [Tears of Steel](https://mango.blender.org/) © Blender Foundation | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)（官方英/中字幕）
+Footage: [Sintel](https://durian.blender.org/) © Blender Foundation | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)（官方英文字幕；官方未发布中文，中文字幕为项目自行翻译）
