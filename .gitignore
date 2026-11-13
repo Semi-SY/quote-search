@@ -1,0 +1,48 @@
+# ===== 数据 =====
+# 原始素材（版权文件 + 体积大，绝不进镜像）
+data/raw/
+# 临时切片文件
+data/clips/*.tmp
+data/clips/*.log
+
+# ===== 依赖与缓存 =====
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# ===== 本地配置（含密钥，永不提交）=====
+.env
+.env.local
+
+# ===== Windows 专用工具/安装包 =====
+tools/
+py-installer.exe
+
+# ===== 构建/管线（运行期不需要）=====
+pipeline/
+db/
+tests/
+
+# ===== 前端源码（只提交 app/static/ 构建产物）=====
+web/node_modules/
+web/dist/
+web/.oxlintrc.json
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+
+# ===== 文档/辅助文件 =====
+IMPLEMENTATION.md
+Makefile
+requirements-dev.txt
+.env.example
+
+# ===== 本地开发 =====
+.trae/
+.vscode/
+*.swp

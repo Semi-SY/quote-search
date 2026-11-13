@@ -1,0 +1,33 @@
+# Git / IDE
+.git
+.trae
+.venv
+**/__pycache__
+.pytest_cache
+
+# 原始素材（Docker 里不跑 ffmpeg 切片）
+data/raw
+data/clips/*.tmp
+data/clips/*.log
+
+# 构建/测试管线（运行期不需要）
+pipeline/
+db/
+tests/
+
+# 前端源码（只需要 app/static/ 构建产物）
+web/
+
+# 工具（Windows ffmpeg 等）
+tools/
+
+# 系统/安装包
+py-installer.exe
+
+# 环境/密钥
+.env
+.env.local
+
+# 文档（README.md 必须保留，HF 读 front matter）
+IMPLEMENTATION.md
+Makefile

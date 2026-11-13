@@ -1,0 +1,83 @@
+/* quote-search 设计 token（§6.9） */
+:root {
+  /* 颜色 */
+  --c-bg: #ffffff;
+  --c-surface: #fafafa;
+  --c-border: #e5e5e5;
+  --c-text: #18181b;
+  --c-text-secondary: #52525b;
+  --c-text-muted: #a1a1aa;
+  --c-accent: #e8623c;
+  --c-accent-hover: #d54d26;
+  --c-em-bg: #fff1ea; /* 命中词高亮背景 */
+  --c-placeholder: #d4d4d8;
+
+  /* 字体 */
+  --font-en: Georgia, 'Times New Roman', Times, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* 间距（8 的倍数） */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  /* 圆角 */
+  --r-card: 12px;
+  --r-input: 8px;
+  --r-chip: 999px;
+
+  /* 阴影 */
+  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-dialog: 0 24px 80px rgba(0, 0, 0, 0.24);
+
+  /* 容器 */
+  --container-max: 1280px;
+  --grid-min-col: 260px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-bg: #0f0f10;
+    --c-surface: #18181b;
+    --c-border: #27272a;
+    --c-text: #fafafa;
+    --c-text-secondary: #a1a1aa;
+    --c-text-muted: #71717a;
+    --c-em-bg: #3a1f14;
+    --c-placeholder: #27272a;
+  }
+}
+
+/* 全局 reset + 基础排版 */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: inherit; text-decoration: none; }
+
+button {
+  font-family: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* 工具类 */
+.clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
