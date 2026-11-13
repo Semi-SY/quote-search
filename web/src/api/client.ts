@@ -17,6 +17,7 @@ export interface SearchItem {
   align_confidence: number;
   clip_url: string;
   poster_url: string;
+  scene_clip_url: string;
   share_url: string;
 }
 
@@ -34,7 +35,28 @@ export interface Episode {
   episode: number;
   title_en: string | null;
   title_zh: string | null;
+  genre: string | null;
+  source: string | null;
   line_count: number;
+}
+
+export interface Genre {
+  genre: string;
+  episode_count: number;
+  line_count: number;
+}
+
+export interface ContextLine {
+  id: number;
+  text_en: string;
+  text_zh: string | null;
+}
+
+export interface LineDetail extends SearchItem {
+  context: {
+    prev: ContextLine[];
+    next: ContextLine[];
+  };
 }
 
 export interface HealthResponse {
@@ -56,11 +78,12 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export function search(
   q: string,
-  params: { season?: number; episode?: number; page?: number; size?: number } = {},
+  params: { season?: number; episode?: number; genre?: string; page?: number; size?: number } = {},
 ): Promise<SearchResponse> {
   const sp = new URLSearchParams({ q });
   if (params.season) sp.set('season', String(params.season));
   if (params.episode) sp.set('episode', String(params.episode));
+  if (params.genre) sp.set('genre', params.genre);
   if (params.page) sp.set('page', String(params.page));
   if (params.size) sp.set('size', String(params.size));
   return apiGet<SearchResponse>(`/api/search?${sp.toString()}`);
@@ -70,20 +93,47 @@ export function fetchEpisodes(): Promise<{ episodes: Episode[] }> {
   return apiGet<{ episodes: Episode[] }>('/api/episodes');
 }
 
+export function fetchGenres(): Promise<{ genres: Genre[] }> {
+  return apiGet<{ genres: Genre[] }>('/api/genres');
+}
+
 export function fetchFeatured(): Promise<{ items: SearchItem[] }> {
   return apiGet<{ items: SearchItem[] }>('/api/featured');
 }
 
+export function fetchLineDetail(id: number): Promise<LineDetail> {
+  return apiGet<LineDetail>(`/api/lines/${id}`);
+}
+
+/** 单条台词 SRT 下载 URL（含 context 条上下文） */
+export function lineSrtUrl(id: number, context = 0): string {
+  return `/api/lines/${id}/srt?context=${context}`;
+}
+
+/** 整集 SRT 下载 URL */
+export function episodeSrtUrl(season: number, episode: number): string {
+  return `/api/episodes/${season}/${episode}/srt`;
+}
+
 // === Hook：防抖 + 取消请求 ===
 
-export function useSearch(q: string) {
+export interface SearchParams {
+  q: string;
+  season?: number;
+  episode?: number;
+  genre?: string;
+}
+
+export function useSearch({ q, season, episode, genre }: SearchParams) {
   const [data, setData] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 空查询且无筛选 = idle（不请求）
+  const effective = !q.trim() && season === undefined && episode === undefined && !genre;
+
   useEffect(() => {
-    const query = q.trim();
-    if (!query) {
+    if (effective) {
       setData(null);
       setLoading(false);
       setError(null);
@@ -96,7 +146,7 @@ export function useSearch(q: string) {
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const res = await search(query);
+        const res = await search(q, { season, episode, genre, size: 20 });
         if (!ctrl.signal.aborted) setData(res);
       } catch (e: unknown) {
         if (!ctrl.signal.aborted) {
@@ -112,7 +162,7 @@ export function useSearch(q: string) {
       ctrl.abort();
       clearTimeout(t);
     };
-  }, [q]);
+  }, [q, season, episode, genre, effective]);
 
   return { data, loading, error };
 }

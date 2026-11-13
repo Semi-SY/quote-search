@@ -64,6 +64,44 @@
 
 /* === Main === */
 .main { flex: 1; padding: var(--s-6) var(--s-5); }
+
+/* === Hero === */
+.hero {
+  text-align: center;
+  margin-bottom: var(--s-7);
+}
+.hero-title {
+  font-size: clamp(28px, 5vw, 44px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(120deg, var(--c-text) 30%, var(--c-accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: var(--s-2);
+}
+.hero-sub {
+  font-size: 15px;
+  color: var(--c-text-secondary);
+  margin-bottom: var(--s-5);
+}
+.browse-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  border-radius: var(--r-input);
+  background: var(--c-accent);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.15s, transform 0.15s;
+}
+.browse-all-btn:hover {
+  background: var(--c-accent-hover);
+  transform: translateY(-1px);
+}
+
 .container {
   max-width: var(--container-max);
   margin: 0 auto;
@@ -72,6 +110,77 @@
   font-size: 13px;
   color: var(--c-text-muted);
   margin-bottom: var(--s-4);
+}
+
+/* === 筛选条 === */
+.filter-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+.filter-label {
+  flex-shrink: 0;
+  width: 40px;
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--c-text-muted);
+  font-weight: 600;
+}
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  flex: 1;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-chip);
+  font-size: 13px;
+  color: var(--c-text-secondary);
+  transition: all 0.15s;
+}
+.chip:hover {
+  border-color: var(--c-accent);
+  color: var(--c-text);
+}
+.chip.active {
+  background: var(--c-accent);
+  color: #fff;
+  border-color: var(--c-accent);
+}
+.chip-count {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* === 加载更多 === */
+.load-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--s-6);
+}
+.load-more-btn {
+  padding: 10px 28px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-input);
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: 14px;
+  transition: all 0.15s;
+}
+.load-more-btn:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+.load-more-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* === Grid（一行 CSS 搞定自适应列数）=== */
@@ -149,6 +258,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s;
+}
+.card:hover .play-badge {
+  background: var(--c-accent);
+}
+.poster-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.25) 0%, transparent 40%);
+  pointer-events: none;
 }
 .duration-badge {
   position: absolute;
@@ -191,6 +311,13 @@
   padding: 1px 6px;
   background: var(--c-surface);
   border-radius: 4px;
+}
+.meta-chip.film {
+  font-family: inherit;
+  color: var(--c-accent);
+  font-weight: 600;
+  background: transparent;
+  padding: 0;
 }
 .confidence-tag {
   margin-top: var(--s-1);
@@ -321,20 +448,129 @@
   color: var(--c-accent);
   border-radius: 4px;
 }
-.actions { display: flex; gap: var(--s-3); }
-.share-btn {
+
+/* 播放模式切换 */
+.play-mode-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-input);
+  margin-bottom: var(--s-3);
+}
+.mode-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2) var(--s-4);
-  border-radius: var(--r-input);
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: calc(var(--r-input) - 2px);
+  font-size: 12px;
+  color: var(--c-text-secondary);
+  background: transparent;
+  transition: all 0.15s;
+}
+.mode-btn:hover { color: var(--c-text); }
+.mode-btn.active {
   background: var(--c-accent);
   color: white;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
 }
-.share-btn:hover { background: var(--c-accent-hover); }
+
+/* 上下文对话 */
+.context-block {
+  margin: var(--s-4) 0;
+  padding: var(--s-3);
+  background: var(--c-surface);
+  border-radius: var(--r-card);
+  border: 1px solid var(--c-border);
+}
+.context-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-text-muted);
+  margin-bottom: var(--s-2);
+}
+.context-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.context-line .ctx-arrow {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--c-text-muted);
+  opacity: 0.5;
+}
+.context-line.prev .ctx-en,
+.context-line.next .ctx-en {
+  color: var(--c-text-secondary);
+}
+.context-line.prev .ctx-zh,
+.context-line.next .ctx-zh {
+  color: var(--c-text-muted);
+}
+.context-line.current {
+  background: rgba(232, 98, 60, 0.08);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 4px -8px;
+}
+.context-line.current .ctx-en {
+  color: var(--c-text);
+  font-weight: 600;
+}
+.context-line.current .ctx-zh {
+  color: var(--c-text-secondary);
+}
+.ctx-en {
+  font-family: var(--font-en);
+}
+.ctx-zh {
+  margin-left: 8px;
+  color: var(--c-text-muted);
+}
+
+/* 操作按钮 */
+.actions {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  margin-top: var(--s-4);
+}
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--r-input);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.action-btn:hover {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+.action-btn.primary {
+  background: var(--c-accent);
+  color: white;
+  border-color: var(--c-accent);
+}
+.action-btn.primary:hover {
+  background: var(--c-accent-hover);
+  border-color: var(--c-accent-hover);
+  color: white;
+}
+.action-btn.ghost {
+  background: transparent;
+}
 
 @keyframes fade-in {
   from { opacity: 0; }

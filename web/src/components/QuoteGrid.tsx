@@ -9,10 +9,13 @@ interface Props {
   error: string | null;
   /** idle 状态或空结果时的精选卡片（样本数据） */
   featured: SearchItem[];
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   onCardClick: (item: SearchItem) => void;
 }
 
-export default function QuoteGrid({ response, loading, error, featured, onCardClick }: Props) {
+export default function QuoteGrid({ response, loading, error, featured, hasMore, loadingMore, onLoadMore, onCardClick }: Props) {
   // 骨架屏（8 张）
   if (loading) {
     return (
@@ -86,6 +89,13 @@ export default function QuoteGrid({ response, loading, error, featured, onCardCl
           <QuoteCard key={item.id} item={item} hue={i} onClick={onCardClick} />
         ))}
       </div>
+      {hasMore && (
+        <div className="load-more-wrap">
+          <button className="load-more-btn" onClick={onLoadMore} disabled={loadingMore}>
+            {loadingMore ? '加载中…' : '加载更多'}
+          </button>
+        </div>
+      )}
     </>
   );
 }

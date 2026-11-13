@@ -38,7 +38,7 @@ export default function QuoteCard({ item, hue, onClick }: Props) {
         {item.text_zh && <p className="zh clamp-1">{item.text_zh}</p>}
 
         <div className="meta">
-          <span className="meta-chip">S{item.season.toString().padStart(2, '0')}E{item.episode.toString().padStart(2, '0')}</span>
+          <span className="meta-chip film">{item.episode_title_zh || item.episode_title_en}</span>
           <span className="meta-chip">{item.timecode}</span>
           {item.speaker && <span className="meta-chip">{item.speaker}</span>}
         </div>

@@ -14,6 +14,14 @@ from typing import Optional
 from app import db
 
 
+_CJK_RE = re.compile(r"[\u3000-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
+
+
+def _has_cjk(query: str) -> bool:
+    """查询是否含中日韩字符。含中文走 trigram 子串，纯英文走 porter 词元。"""
+    return bool(_CJK_RE.search(query))
+
+
 def _match_like(query: str) -> str:
     """为 LIKE 转义 % _ \\，前后包 %。"""
     q = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -69,6 +77,7 @@ def line_to_item(row: sqlite3.Row) -> dict:
     ep_key = f"s{season:02d}e{episode:02d}"
     default_mp4 = f"clips/{ep_key}/{row['id']:06d}.mp4"
     default_jpg = f"clips/{ep_key}/{row['id']:06d}.jpg"
+    default_scene = f"clips/{ep_key}/{row['id']:06d}_scene.mp4"
     clips_key = row["object_key"] or default_mp4
     poster_key = row["poster_key"] or default_jpg
     return {
@@ -86,6 +95,7 @@ def line_to_item(row: sqlite3.Row) -> dict:
         "align_confidence": row["align_confidence"],
         "clip_url": f"/media/{clips_key}",
         "poster_url": f"/media/{poster_key}",
+        "scene_clip_url": f"/media/{default_scene}",
         "share_url": f"/s/{_encode_base62(row['id'])}",
     }
 
@@ -107,6 +117,7 @@ def search(
     season: Optional[int] = None,
     episode: Optional[int] = None,
     speaker: Optional[str] = None,
+    genre: Optional[str] = None,
     page: int = 1,
     size: int = 20,
 ) -> dict:
@@ -131,11 +142,14 @@ def search(
       c.object_key, c.poster_key
     """
 
-    # FTS 可用吗？查询长度 >= 3 才走 FTS
-    use_fts = len(query) >= 3
+    # 选索引：含中文 → trigram（子串）；纯英文 → porter（词边界，"now" 不命中 "know"）
+    has_cjk = _has_cjk(query)
+    use_fts = (has_cjk and len(query) >= 2) or (not has_cjk and len(query) >= 1)
     if use_fts:
-        # trigram 需要 3+ 字符
-        where.append("l.id IN (SELECT rowid FROM lines_fts WHERE lines_fts MATCH ?)")
+        if has_cjk:
+            where.append("l.id IN (SELECT rowid FROM lines_fts WHERE lines_fts MATCH ?)")
+        else:
+            where.append("l.id IN (SELECT rowid FROM lines_fts_word WHERE lines_fts_word MATCH ?)")
         params.append(query)
 
     if season is not None:
@@ -147,6 +161,9 @@ def search(
     if speaker:
         where.append("l.speaker LIKE ?")
         params.append(f"%{speaker}%")
+    if genre:
+        where.append("e.genre = ?")
+        params.append(genre)
 
     base_sql = f"SELECT {fields} {joins}"
     w = ("WHERE " + " AND ".join(where)) if where else ""
@@ -157,16 +174,19 @@ def search(
 
         # 排序 + 分页
         if use_fts:
-            # bm25 + 短句加权
+            fts_table = "lines_fts" if has_cjk else "lines_fts_word"
+            # bm25 + 短句加权；附加筛选条件（season/episode/speaker/genre）追加到 WHERE
+            extra_where = where[1:]  # 跳过第一条 FTS MATCH
+            extra_sql = (" AND " + " AND ".join(extra_where)) if extra_where else ""
             rank_sql = f"""
-              SELECT {fields}, bm25(lines_fts) AS rank
-              FROM lines_fts
-              JOIN lines l ON l.id = lines_fts.rowid
+              SELECT {fields}, bm25({fts_table}) AS rank
+              FROM {fts_table}
+              JOIN lines l ON l.id = {fts_table}.rowid
               JOIN episodes e ON e.id = l.episode_id
               LEFT JOIN clips c ON c.line_id = l.id
-              WHERE lines_fts MATCH ?
+              WHERE {fts_table} MATCH ?{extra_sql}
             """
-            rank_params = [query] + params[1:]  # 跳过第一个（query 已给 lines_fts MATCH）
+            rank_params = [query] + params[1:]  # 跳过第一个（query 已给 FTS MATCH）
             order = "ORDER BY rank ASC, length(l.text_en) ASC"
         else:
             rank_sql = f"{base_sql} {w}"
@@ -213,15 +233,30 @@ def get_featured(limit: int = 12) -> list[dict]:
 
 
 def get_episodes() -> list[dict]:
-    """季集列表（筛选器用）。"""
+    """季集列表（筛选器用），含 genre / source。"""
     with db.read_conn() as conn:
         rows = conn.execute(
-            """SELECT e.season, e.episode, e.title_en, e.title_zh,
+            """SELECT e.season, e.episode, e.title_en, e.title_zh, e.genre, e.source,
                       count(l.id) AS line_count
                FROM episodes e
                LEFT JOIN lines l ON l.episode_id = e.id
                GROUP BY e.season, e.episode
                ORDER BY e.season, e.episode"""
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_genres() -> list[dict]:
+    """题材分类统计（筛选器用）。"""
+    with db.read_conn() as conn:
+        rows = conn.execute(
+            """SELECT COALESCE(e.genre, 'other') AS genre,
+                      count(DISTINCT e.id) AS episode_count,
+                      count(l.id) AS line_count
+               FROM episodes e
+               LEFT JOIN lines l ON l.episode_id = e.id
+               GROUP BY e.genre
+               ORDER BY line_count DESC"""
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -257,3 +292,75 @@ def get_line(line_id: int) -> Optional[dict]:
         "next": [dict(r) for r in next_rows],
     }
     return item
+
+
+# === SRT 导出 ===
+
+def _ms_to_srt_ts(ms: int) -> str:
+    """毫秒 → SRT 时间戳 HH:MM:SS,mmm。"""
+    ms = max(0, ms)
+    h = ms // 3_600_000
+    m = (ms // 60_000) % 60
+    s = (ms // 1000) % 60
+    frac = ms % 1000
+    return f"{h:02d}:{m:02d}:{s:02d},{frac:03d}"
+
+
+def line_to_srt(line_id: int, *, context: int = 0) -> Optional[str]:
+    """单条台词导出为 SRT。context=前N条+后N条一并导出（含当前行）。"""
+    with db.read_conn() as conn:
+        row = conn.execute(
+            "SELECT episode_id, seq FROM lines WHERE id=?", (line_id,)
+        ).fetchone()
+        if not row:
+            return None
+        ep_id = row["episode_id"]
+        seq = row["seq"]
+        rows = conn.execute(
+            """SELECT seq, start_ms, end_ms, text_en, text_zh
+               FROM lines
+               WHERE episode_id=? AND seq BETWEEN ? AND ?
+               ORDER BY seq""",
+            (ep_id, seq - context, seq + context),
+        ).fetchall()
+
+    parts: list[str] = []
+    for i, r in enumerate(rows, start=1):
+        text_parts = [r["text_en"]]
+        if r["text_zh"]:
+            text_parts.append(r["text_zh"])
+        text_block = "\n".join(text_parts)
+        parts.append(
+            f"{i}\n"
+            f"{_ms_to_srt_ts(r['start_ms'])} --> {_ms_to_srt_ts(r['end_ms'])}\n"
+            f"{text_block}\n"
+        )
+    return "\n".join(parts)
+
+
+def episode_to_srt(season: int, episode: int) -> Optional[str]:
+    """整集台词导出为 SRT。"""
+    with db.read_conn() as conn:
+        rows = conn.execute(
+            """SELECT l.seq, l.start_ms, l.end_ms, l.text_en, l.text_zh
+               FROM lines l
+               JOIN episodes e ON e.id = l.episode_id
+               WHERE e.season=? AND e.episode=?
+               ORDER BY l.seq""",
+            (season, episode),
+        ).fetchall()
+        if not rows:
+            return None
+
+    parts: list[str] = []
+    for i, r in enumerate(rows, start=1):
+        text_parts = [r["text_en"]]
+        if r["text_zh"]:
+            text_parts.append(r["text_zh"])
+        text_block = "\n".join(text_parts)
+        parts.append(
+            f"{i}\n"
+            f"{_ms_to_srt_ts(r['start_ms'])} --> {_ms_to_srt_ts(r['end_ms'])}\n"
+            f"{text_block}\n"
+        )
+    return "\n".join(parts)
