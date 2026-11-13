@@ -142,10 +142,18 @@ def search(
       c.object_key, c.poster_key
     """
 
-    # 选索引：含中文 → trigram（子串）；纯英文 → porter（词边界，"now" 不命中 "know"）
+    # 选索引：中文 ≥3 字走 trigram；中文 1-2 字 trigram 无法命中，降级 LIKE
+    # 纯英文走 porter 词元（词边界，"now" 不命中 "know"）
     has_cjk = _has_cjk(query)
-    use_fts = (has_cjk and len(query) >= 2) or (not has_cjk and len(query) >= 1)
-    if use_fts:
+    short_cjk = has_cjk and len(query) < 3
+    use_fts = (has_cjk and not short_cjk) or (not has_cjk and len(query) >= 1)
+    if short_cjk:
+        like = _match_like(query)
+        where.append(
+            "(l.text_zh LIKE ? ESCAPE '\\' OR l.text_en LIKE ? ESCAPE '\\')"
+        )
+        params.extend([like, like])
+    elif use_fts:
         if has_cjk:
             where.append("l.id IN (SELECT rowid FROM lines_fts WHERE lines_fts MATCH ?)")
         else:
@@ -159,10 +167,12 @@ def search(
         where.append("e.episode = ?")
         params.append(episode)
     if speaker:
-        where.append("l.speaker LIKE ?")
-        params.append(f"%{speaker}%")
+        where.append("l.speaker = ?")
+        params.append(speaker)
     if genre:
-        where.append("e.genre = ?")
+        where.append(
+            "l.episode_id IN (SELECT episode_id FROM episode_genres WHERE genre = ?)"
+        )
         params.append(genre)
 
     base_sql = f"SELECT {fields} {joins}"
@@ -232,37 +242,110 @@ def get_featured(limit: int = 12) -> list[dict]:
     return [line_to_item(r) for r in rows]
 
 
+def get_random() -> Optional[dict]:
+    """随机一条台词，供首页「换一句」使用。"""
+    with db.read_conn() as conn:
+        row = conn.execute(
+            """SELECT l.id, e.season, e.episode, e.title_en AS episode_title_en,
+                      e.title_zh AS episode_title_zh,
+                      l.start_ms, l.end_ms, l.text_en, l.text_zh,
+                      l.speaker, l.align_confidence,
+                      c.object_key, c.poster_key
+               FROM lines l
+               JOIN episodes e ON e.id = l.episode_id
+               LEFT JOIN clips c ON c.line_id = l.id
+               ORDER BY RANDOM()
+               LIMIT 1"""
+        ).fetchone()
+    return line_to_item(row) if row else None
+
+
 def get_episodes() -> list[dict]:
-    """季集列表（筛选器用），含 genre / source。"""
+    """季集列表（筛选器用），含多题材标签 / source。"""
     with db.read_conn() as conn:
         rows = conn.execute(
-            """SELECT e.season, e.episode, e.title_en, e.title_zh, e.genre, e.source,
-                      count(l.id) AS line_count
+            """SELECT e.id AS episode_id, e.season, e.episode, e.title_en, e.title_zh,
+                      e.genre, e.source, count(l.id) AS line_count
                FROM episodes e
                LEFT JOIN lines l ON l.episode_id = e.id
                GROUP BY e.season, e.episode
                ORDER BY e.season, e.episode"""
         ).fetchall()
-    return [dict(r) for r in rows]
+        genre_rows = conn.execute(
+            "SELECT episode_id, genre FROM episode_genres ORDER BY genre"
+        ).fetchall()
+
+    genres_by_episode: dict[int, list[str]] = {}
+    for row in genre_rows:
+        genres_by_episode.setdefault(int(row["episode_id"]), []).append(row["genre"])
+
+    episodes = []
+    for row in rows:
+        item = dict(row)
+        episode_id = int(item.pop("episode_id"))
+        item["genres"] = genres_by_episode.get(episode_id, [])
+        episodes.append(item)
+    return episodes
 
 
 def get_genres() -> list[dict]:
-    """题材分类统计（筛选器用）。"""
+    """多题材分类统计（筛选器用），一个题材可覆盖多部影片。"""
     with db.read_conn() as conn:
         rows = conn.execute(
-            """SELECT COALESCE(e.genre, 'other') AS genre,
-                      count(DISTINCT e.id) AS episode_count,
+            """SELECT eg.genre AS genre,
+                      count(DISTINCT eg.episode_id) AS episode_count,
                       count(l.id) AS line_count
-               FROM episodes e
+               FROM episode_genres eg
+               JOIN episodes e ON e.id = eg.episode_id
                LEFT JOIN lines l ON l.episode_id = e.id
-               GROUP BY e.genre
-               ORDER BY line_count DESC"""
+               GROUP BY eg.genre
+               ORDER BY line_count DESC, eg.genre"""
         ).fetchall()
     return [dict(r) for r in rows]
 
 
+def get_speakers() -> list[dict]:
+    """说话人分类统计（筛选器用）。"""
+    with db.read_conn() as conn:
+        rows = conn.execute(
+            """SELECT speaker, count(*) AS line_count
+               FROM lines
+               WHERE speaker IS NOT NULL AND TRIM(speaker) <> ''
+               GROUP BY speaker
+               ORDER BY line_count DESC, speaker"""
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+_SCENE_MAX_GAP_MS = 12_000
+_SCENE_MAX_DURATION_MS = 45_000
+
+
+def _scene_window(
+    rows: list[sqlite3.Row], index: int, context: int = 2
+) -> list[sqlite3.Row]:
+    """选取实际包含在场景视频里的上下文；规则与离线切片保持一致。"""
+    start = index
+    end = index + 1
+    while index - start < context and start > 0:
+        candidate = rows[start - 1]
+        gap = rows[start]["start_ms"] - candidate["end_ms"]
+        duration = rows[end - 1]["end_ms"] - candidate["start_ms"]
+        if gap > _SCENE_MAX_GAP_MS or duration > _SCENE_MAX_DURATION_MS:
+            break
+        start -= 1
+    while end - index - 1 < context and end < len(rows):
+        candidate = rows[end]
+        gap = candidate["start_ms"] - rows[end - 1]["end_ms"]
+        duration = candidate["end_ms"] - rows[start]["start_ms"]
+        if gap > _SCENE_MAX_GAP_MS or duration > _SCENE_MAX_DURATION_MS:
+            break
+        end += 1
+    return rows[start:end]
+
+
 def get_line(line_id: int) -> Optional[dict]:
-    """单条详情 + 前后文各 2 条。"""
+    """单条详情 + 与场景视频完全一致的前后文。"""
     with db.read_conn() as conn:
         row = conn.execute(
             """SELECT l.*, e.season, e.episode, e.title_en AS episode_title_en,
@@ -275,21 +358,20 @@ def get_line(line_id: int) -> Optional[dict]:
         ).fetchone()
         if not row:
             return None
-        prev_rows = conn.execute(
-            """SELECT id, text_en, text_zh FROM lines
-               WHERE episode_id=? AND seq < ? ORDER BY seq DESC LIMIT 2""",
-            (row["episode_id"], row["seq"]),
-        ).fetchall()
-        next_rows = conn.execute(
-            """SELECT id, text_en, text_zh FROM lines
-               WHERE episode_id=? AND seq > ? ORDER BY seq ASC LIMIT 2""",
-            (row["episode_id"], row["seq"]),
+        rows = conn.execute(
+            """SELECT id, seq, start_ms, end_ms, text_en, text_zh, speaker
+               FROM lines WHERE episode_id=? ORDER BY seq""",
+            (row["episode_id"],),
         ).fetchall()
 
+    current_index = next(i for i, r in enumerate(rows) if r["id"] == line_id)
+    scene_rows = _scene_window(rows, current_index, context=2)
     item = line_to_item(row)
+    item["scene_start_ms"] = scene_rows[0]["start_ms"]
+    item["scene_end_ms"] = scene_rows[-1]["end_ms"]
     item["context"] = {
-        "prev": [dict(r) for r in reversed(prev_rows)],
-        "next": [dict(r) for r in next_rows],
+        "prev": [dict(r) for r in scene_rows if r["seq"] < row["seq"]],
+        "next": [dict(r) for r in scene_rows if r["seq"] > row["seq"]],
     }
     return item
 
@@ -306,8 +388,24 @@ def _ms_to_srt_ts(ms: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{frac:03d}"
 
 
-def line_to_srt(line_id: int, *, context: int = 0) -> Optional[str]:
+_SRT_LANGS = {"bi", "en", "zh"}
+
+
+def _srt_text(text_en: str, text_zh: Optional[str], lang: str) -> str:
+    """按语言模式拼接字幕文本：bi 双语、en 纯英文、zh 纯中文（缺失时回退英文）。"""
+    if lang == "en":
+        return text_en
+    if lang == "zh":
+        return text_zh or text_en
+    return f"{text_en}\n{text_zh}" if text_zh else text_en
+
+
+def line_to_srt(
+    line_id: int, *, context: int = 0, lang: str = "bi"
+) -> Optional[str]:
     """单条台词导出为 SRT。context=前N条+后N条一并导出（含当前行）。"""
+    if lang not in _SRT_LANGS:
+        raise ValueError(f"不支持的字幕语言：{lang}")
     with db.read_conn() as conn:
         row = conn.execute(
             "SELECT episode_id, seq FROM lines WHERE id=?", (line_id,)
@@ -316,20 +414,17 @@ def line_to_srt(line_id: int, *, context: int = 0) -> Optional[str]:
             return None
         ep_id = row["episode_id"]
         seq = row["seq"]
-        rows = conn.execute(
-            """SELECT seq, start_ms, end_ms, text_en, text_zh
-               FROM lines
-               WHERE episode_id=? AND seq BETWEEN ? AND ?
-               ORDER BY seq""",
-            (ep_id, seq - context, seq + context),
+        all_rows = conn.execute(
+            """SELECT id, seq, start_ms, end_ms, text_en, text_zh, speaker
+               FROM lines WHERE episode_id=? ORDER BY seq""",
+            (ep_id,),
         ).fetchall()
 
+    current_index = next(i for i, r in enumerate(all_rows) if r["seq"] == seq)
+    rows = _scene_window(all_rows, current_index, context=context)
     parts: list[str] = []
     for i, r in enumerate(rows, start=1):
-        text_parts = [r["text_en"]]
-        if r["text_zh"]:
-            text_parts.append(r["text_zh"])
-        text_block = "\n".join(text_parts)
+        text_block = _srt_text(r["text_en"], r["text_zh"], lang)
         parts.append(
             f"{i}\n"
             f"{_ms_to_srt_ts(r['start_ms'])} --> {_ms_to_srt_ts(r['end_ms'])}\n"
@@ -338,8 +433,10 @@ def line_to_srt(line_id: int, *, context: int = 0) -> Optional[str]:
     return "\n".join(parts)
 
 
-def episode_to_srt(season: int, episode: int) -> Optional[str]:
+def episode_to_srt(season: int, episode: int, *, lang: str = "bi") -> Optional[str]:
     """整集台词导出为 SRT。"""
+    if lang not in _SRT_LANGS:
+        raise ValueError(f"不支持的字幕语言：{lang}")
     with db.read_conn() as conn:
         rows = conn.execute(
             """SELECT l.seq, l.start_ms, l.end_ms, l.text_en, l.text_zh
@@ -354,10 +451,7 @@ def episode_to_srt(season: int, episode: int) -> Optional[str]:
 
     parts: list[str] = []
     for i, r in enumerate(rows, start=1):
-        text_parts = [r["text_en"]]
-        if r["text_zh"]:
-            text_parts.append(r["text_zh"])
-        text_block = "\n".join(text_parts)
+        text_block = _srt_text(r["text_en"], r["text_zh"], lang)
         parts.append(
             f"{i}\n"
             f"{_ms_to_srt_ts(r['start_ms'])} --> {_ms_to_srt_ts(r['end_ms'])}\n"

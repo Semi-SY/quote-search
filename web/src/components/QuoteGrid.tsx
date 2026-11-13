@@ -1,22 +1,26 @@
 import type { SearchItem, SearchResponse } from '../api/client';
 import QuoteCard from './QuoteCard';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Heart } from 'lucide-react';
 
 interface Props {
-  /** null = 还没开始搜（idle 状态，展示精选） */
   response: SearchResponse | null;
   loading: boolean;
   error: string | null;
-  /** idle 状态或空结果时的精选卡片（样本数据） */
   featured: SearchItem[];
+  favoriteIds: Set<number>;
+  onToggleFavorite: (item: SearchItem) => void;
+  isFavoritesView?: boolean;
+  sectionTitle?: string;
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
   onCardClick: (item: SearchItem) => void;
 }
 
-export default function QuoteGrid({ response, loading, error, featured, hasMore, loadingMore, onLoadMore, onCardClick }: Props) {
-  // 骨架屏（8 张）
+export default function QuoteGrid({
+  response, loading, error, featured, favoriteIds, onToggleFavorite,
+  isFavoritesView = false, sectionTitle, hasMore, loadingMore, onLoadMore, onCardClick,
+}: Props) {
   if (loading) {
     return (
       <div className="grid">
@@ -44,35 +48,44 @@ export default function QuoteGrid({ response, loading, error, featured, hasMore,
     );
   }
 
-  // idle：没输入 → 展示精选
   if (!response) {
     if (featured.length === 0) {
-      return (
-        <div className="empty-state">
-          <p>输入关键词，搜索台词</p>
-        </div>
-      );
+      return <div className="empty-state"><p>输入关键词，搜索台词</p></div>;
     }
     return (
       <>
         <p className="section-subtitle">精选台词 · {featured.length} 条</p>
         <div className="grid">
           {featured.map((item, i) => (
-            <QuoteCard key={item.id} item={item} hue={i} onClick={onCardClick} />
+            <QuoteCard
+              key={item.id} item={item} hue={i} onClick={onCardClick}
+              isFavorite={favoriteIds.has(item.id)} onToggleFavorite={onToggleFavorite}
+            />
           ))}
         </div>
       </>
     );
   }
 
-  // 搜索结果
   if (response.items.length === 0) {
+    if (isFavoritesView) {
+      return (
+        <div className="empty-state favorites-empty">
+          <Heart size={42} />
+          <h3>还没有收藏台词</h3>
+          <p>点击视频卡片上的心形按钮，把常用素材放在这里。</p>
+        </div>
+      );
+    }
     return (
       <div className="empty-state">
         <p>没找到「{response.query}」，试试这些</p>
         <div className="grid">
           {featured.map((item, i) => (
-            <QuoteCard key={item.id} item={item} hue={i} onClick={onCardClick} />
+            <QuoteCard
+              key={item.id} item={item} hue={i} onClick={onCardClick}
+              isFavorite={favoriteIds.has(item.id)} onToggleFavorite={onToggleFavorite}
+            />
           ))}
         </div>
       </div>
@@ -82,14 +95,17 @@ export default function QuoteGrid({ response, loading, error, featured, hasMore,
   return (
     <>
       <p className="section-subtitle">
-        找到 {response.total} 条 · {response.took_ms}ms
+        {sectionTitle || `找到 ${response.total} 条 · ${response.took_ms}ms`}
       </p>
       <div className="grid">
         {response.items.map((item, i) => (
-          <QuoteCard key={item.id} item={item} hue={i} onClick={onCardClick} />
+          <QuoteCard
+            key={item.id} item={item} hue={i} onClick={onCardClick}
+            isFavorite={favoriteIds.has(item.id)} onToggleFavorite={onToggleFavorite}
+          />
         ))}
       </div>
-      {hasMore && (
+      {hasMore && !isFavoritesView && (
         <div className="load-more-wrap">
           <button className="load-more-btn" onClick={onLoadMore} disabled={loadingMore}>
             {loadingMore ? '加载中…' : '加载更多'}

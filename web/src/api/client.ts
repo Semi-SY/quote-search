@@ -36,6 +36,7 @@ export interface Episode {
   title_en: string | null;
   title_zh: string | null;
   genre: string | null;
+  genres: string[] | null;
   source: string | null;
   line_count: number;
 }
@@ -46,13 +47,24 @@ export interface Genre {
   line_count: number;
 }
 
+export interface Speaker {
+  speaker: string;
+  line_count: number;
+}
+
 export interface ContextLine {
   id: number;
+  seq: number;
+  start_ms: number;
+  end_ms: number;
   text_en: string;
   text_zh: string | null;
+  speaker: string | null;
 }
 
 export interface LineDetail extends SearchItem {
+  scene_start_ms: number;
+  scene_end_ms: number;
   context: {
     prev: ContextLine[];
     next: ContextLine[];
@@ -78,11 +90,12 @@ export async function apiGet<T>(path: string): Promise<T> {
 
 export function search(
   q: string,
-  params: { season?: number; episode?: number; genre?: string; page?: number; size?: number } = {},
+  params: { season?: number; episode?: number; speaker?: string; genre?: string; page?: number; size?: number } = {},
 ): Promise<SearchResponse> {
   const sp = new URLSearchParams({ q });
   if (params.season) sp.set('season', String(params.season));
   if (params.episode) sp.set('episode', String(params.episode));
+  if (params.speaker) sp.set('speaker', params.speaker);
   if (params.genre) sp.set('genre', params.genre);
   if (params.page) sp.set('page', String(params.page));
   if (params.size) sp.set('size', String(params.size));
@@ -97,22 +110,33 @@ export function fetchGenres(): Promise<{ genres: Genre[] }> {
   return apiGet<{ genres: Genre[] }>('/api/genres');
 }
 
+export function fetchSpeakers(): Promise<{ speakers: Speaker[] }> {
+  return apiGet<{ speakers: Speaker[] }>('/api/speakers');
+}
+
 export function fetchFeatured(): Promise<{ items: SearchItem[] }> {
   return apiGet<{ items: SearchItem[] }>('/api/featured');
+}
+
+/** 随机一条台词（首页「换一句」）。 */
+export function fetchRandom(): Promise<SearchItem> {
+  return apiGet<SearchItem>('/api/random');
 }
 
 export function fetchLineDetail(id: number): Promise<LineDetail> {
   return apiGet<LineDetail>(`/api/lines/${id}`);
 }
 
+export type SrtLang = 'bi' | 'en' | 'zh';
+
 /** 单条台词 SRT 下载 URL（含 context 条上下文） */
-export function lineSrtUrl(id: number, context = 0): string {
-  return `/api/lines/${id}/srt?context=${context}`;
+export function lineSrtUrl(id: number, context = 0, lang: SrtLang = 'bi'): string {
+  return `/api/lines/${id}/srt?context=${context}&lang=${lang}`;
 }
 
 /** 整集 SRT 下载 URL */
-export function episodeSrtUrl(season: number, episode: number): string {
-  return `/api/episodes/${season}/${episode}/srt`;
+export function episodeSrtUrl(season: number, episode: number, lang: SrtLang = 'bi'): string {
+  return `/api/episodes/${season}/${episode}/srt?lang=${lang}`;
 }
 
 // === Hook：防抖 + 取消请求 ===
@@ -121,16 +145,20 @@ export interface SearchParams {
   q: string;
   season?: number;
   episode?: number;
+  speaker?: string;
   genre?: string;
+  /** 浏览全部素材：即使没有关键词与筛选也要请求全库 */
+  browseAll?: boolean;
 }
 
-export function useSearch({ q, season, episode, genre }: SearchParams) {
+export function useSearch({ q, season, episode, speaker, genre, browseAll = false }: SearchParams) {
   const [data, setData] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 空查询且无筛选 = idle（不请求）
-  const effective = !q.trim() && season === undefined && episode === undefined && !genre;
+  // 空查询且无筛选且未进入浏览模式 = idle（不请求）
+  const effective = !browseAll && !q.trim()
+    && season === undefined && episode === undefined && !speaker && !genre;
 
   useEffect(() => {
     if (effective) {
@@ -146,7 +174,7 @@ export function useSearch({ q, season, episode, genre }: SearchParams) {
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const res = await search(q, { season, episode, genre, size: 20 });
+        const res = await search(q, { season, episode, speaker, genre, size: 20 });
         if (!ctrl.signal.aborted) setData(res);
       } catch (e: unknown) {
         if (!ctrl.signal.aborted) {
@@ -162,7 +190,7 @@ export function useSearch({ q, season, episode, genre }: SearchParams) {
       ctrl.abort();
       clearTimeout(t);
     };
-  }, [q, season, episode, genre, effective]);
+  }, [q, season, episode, speaker, genre, browseAll, effective]);
 
   return { data, loading, error };
 }
