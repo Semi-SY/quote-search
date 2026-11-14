@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import APP_VERSION, CLIPS_DIR, STATIC_DIR
@@ -18,4 +19,10 @@ if CLIPS_DIR.is_dir():
     app.mount("/media/clips", StaticFiles(directory=CLIPS_DIR), name="clips")
 
 if (STATIC_DIR / "index.html").is_file():
+
+    @app.get("/browse", include_in_schema=False)
+    @app.get("/favorites", include_in_schema=False)
+    def frontend_entry() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="web")

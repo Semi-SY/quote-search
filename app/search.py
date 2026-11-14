@@ -260,21 +260,72 @@ def get_random() -> Optional[dict]:
     return line_to_item(row) if row else None
 
 
-def get_episodes() -> list[dict]:
-    """季集列表（筛选器用），含多题材标签 / source。"""
+def _match_clause(q: str) -> tuple[str, list]:
+    """把关键词转成 SQL 条件；与 search() 的索引选择保持一致。"""
+    q = (q or "").strip()
+    if not q:
+        return "", []
+    if _has_cjk(q) and len(q) < 3:
+        like = _match_like(q)
+        return "(l.text_zh LIKE ? ESCAPE '\\' OR l.text_en LIKE ? ESCAPE '\\')", [like, like]
+    if _has_cjk(q):
+        return "l.id IN (SELECT rowid FROM lines_fts WHERE lines_fts MATCH ?)", [q]
+    return "l.id IN (SELECT rowid FROM lines_fts_word WHERE lines_fts_word MATCH ?)", [q]
+
+
+def _line_scope(
+    q: str = "",
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+    genre: Optional[str] = None,
+    speaker: Optional[str] = None,
+) -> tuple[str, list]:
+    """构造 facets 统计用的行级过滤条件（别名固定为 l / e）。"""
+    where: list[str] = []
+    params: list = []
+    match_sql, match_params = _match_clause(q)
+    if match_sql:
+        where.append(match_sql)
+        params.extend(match_params)
+    if season is not None:
+        where.append("e.season = ?")
+        params.append(season)
+    if episode is not None:
+        where.append("e.episode = ?")
+        params.append(episode)
+    if speaker:
+        where.append("l.speaker = ?")
+        params.append(speaker)
+    if genre:
+        where.append("l.episode_id IN (SELECT episode_id FROM episode_genres WHERE genre = ?)")
+        params.append(genre)
+    return ((" WHERE " + " AND ".join(where)) if where else ""), params
+
+
+def get_episodes(
+    q: str = "", genre: Optional[str] = None, speaker: Optional[str] = None
+) -> list[dict]:
+    """影片筛选：条数随关键词 / 题材 / 说话人变化（不含影片自身筛选）。"""
+    where, params = _line_scope(q=q, genre=genre, speaker=speaker)
     with db.read_conn() as conn:
+        counted = conn.execute(
+            f"""SELECT l.episode_id, count(*) AS n
+                FROM lines l JOIN episodes e ON e.id = l.episode_id
+                {where}
+                GROUP BY l.episode_id""",
+            params,
+        ).fetchall()
         rows = conn.execute(
             """SELECT e.id AS episode_id, e.season, e.episode, e.title_en, e.title_zh,
-                      e.genre, e.source, count(l.id) AS line_count
+                      e.genre, e.source
                FROM episodes e
-               LEFT JOIN lines l ON l.episode_id = e.id
-               GROUP BY e.season, e.episode
                ORDER BY e.season, e.episode"""
         ).fetchall()
         genre_rows = conn.execute(
             "SELECT episode_id, genre FROM episode_genres ORDER BY genre"
         ).fetchall()
 
+    counts = {int(r["episode_id"]): int(r["n"]) for r in counted}
     genres_by_episode: dict[int, list[str]] = {}
     for row in genre_rows:
         genres_by_episode.setdefault(int(row["episode_id"]), []).append(row["genre"])
@@ -283,36 +334,62 @@ def get_episodes() -> list[dict]:
     for row in rows:
         item = dict(row)
         episode_id = int(item.pop("episode_id"))
+        item["line_count"] = counts.get(episode_id, 0)
         item["genres"] = genres_by_episode.get(episode_id, [])
         episodes.append(item)
     return episodes
 
 
-def get_genres() -> list[dict]:
-    """多题材分类统计（筛选器用），一个题材可覆盖多部影片。"""
+def get_genres(
+    q: str = "",
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+    speaker: Optional[str] = None,
+) -> list[dict]:
+    """题材筛选：条数随关键词 / 影片 / 说话人变化（不含题材自身筛选）。"""
+    where, params = _line_scope(q=q, season=season, episode=episode, speaker=speaker)
     with db.read_conn() as conn:
         rows = conn.execute(
-            """SELECT eg.genre AS genre,
-                      count(DISTINCT eg.episode_id) AS episode_count,
-                      count(l.id) AS line_count
-               FROM episode_genres eg
-               JOIN episodes e ON e.id = eg.episode_id
-               LEFT JOIN lines l ON l.episode_id = e.id
-               GROUP BY eg.genre
-               ORDER BY line_count DESC, eg.genre"""
+            f"""SELECT eg.genre AS genre,
+                       count(DISTINCT CASE WHEN coalesce(c.n, 0) > 0 THEN eg.episode_id END)
+                         AS episode_count,
+                       coalesce(sum(c.n), 0) AS line_count
+                FROM episode_genres eg
+                LEFT JOIN (
+                  SELECT l.episode_id, count(*) AS n
+                  FROM lines l JOIN episodes e ON e.id = l.episode_id
+                  {where}
+                  GROUP BY l.episode_id
+                ) c ON c.episode_id = eg.episode_id
+                GROUP BY eg.genre
+                ORDER BY line_count DESC, eg.genre""",
+            params,
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_speakers() -> list[dict]:
-    """说话人分类统计（筛选器用）。"""
+def get_speakers(
+    q: str = "",
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+    genre: Optional[str] = None,
+) -> list[dict]:
+    """说话人筛选：条数随关键词 / 影片 / 题材变化（不含说话人自身筛选）。"""
+    where, params = _line_scope(q=q, season=season, episode=episode, genre=genre)
     with db.read_conn() as conn:
         rows = conn.execute(
-            """SELECT speaker, count(*) AS line_count
-               FROM lines
-               WHERE speaker IS NOT NULL AND TRIM(speaker) <> ''
-               GROUP BY speaker
-               ORDER BY line_count DESC, speaker"""
+            f"""SELECT s.speaker AS speaker, coalesce(c.n, 0) AS line_count
+                FROM (SELECT DISTINCT speaker FROM lines
+                      WHERE speaker IS NOT NULL AND TRIM(speaker) <> '') s
+                LEFT JOIN (
+                  SELECT l.speaker, count(*) AS n
+                  FROM lines l JOIN episodes e ON e.id = l.episode_id
+                  {where}
+                  {"AND" if where else "WHERE"} l.speaker IS NOT NULL
+                  GROUP BY l.speaker
+                ) c ON c.speaker = s.speaker
+                ORDER BY line_count DESC, s.speaker""",
+            params,
         ).fetchall()
     return [dict(r) for r in rows]
 

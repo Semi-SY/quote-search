@@ -13,27 +13,26 @@ interface Props {
 export default function SearchBar({
   value, onChange, onSubmit, history, onClearHistory, autoFocus,
 }: Props) {
-  const [focused, setFocused] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   function selectHistory(query: string) {
     onChange(query);
     onSubmit(query);
-    setFocused(false);
+    setHistoryOpen(false);
   }
 
   return (
     <div
       className="search-shell"
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
-      }}
+      onMouseEnter={() => setHistoryOpen(true)}
+      onMouseLeave={() => setHistoryOpen(false)}
     >
       <form
-        className={`search-bar ${focused ? 'focused' : ''}`}
+        className={`search-bar ${historyOpen ? 'focused' : ''}`}
         onSubmit={(e) => {
           e.preventDefault();
           onSubmit(value.trim());
-          setFocused(false);
+          setHistoryOpen(false);
         }}
       >
         <Search size={19} className="search-icon" />
@@ -42,7 +41,6 @@ export default function SearchBar({
           placeholder="搜索中英文台词，例如：passion、爱、世界…"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          onFocus={() => setFocused(true)}
           autoFocus={autoFocus}
           maxLength={80}
           aria-label="搜索台词"
@@ -60,31 +58,37 @@ export default function SearchBar({
         )}
       </form>
 
-      {focused && !value && history.length > 0 && (
+      {historyOpen && (
         <div className="search-history">
           <div className="history-heading">
             <span><History size={13} /> 最近搜索</span>
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={onClearHistory}
-              aria-label="清空搜索历史"
-            >
-              <Trash2 size={13} /> 清空
-            </button>
-          </div>
-          <div className="history-list">
-            {history.map((query) => (
+            {history.length > 0 && (
               <button
                 type="button"
-                key={query}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => selectHistory(query)}
+                onClick={onClearHistory}
+                aria-label="清空搜索历史"
               >
-                <History size={13} /> {query}
+                <Trash2 size={13} /> 清空
               </button>
-            ))}
+            )}
           </div>
+          {history.length > 0 ? (
+            <div className="history-list">
+              {history.map((query) => (
+                <button
+                  type="button"
+                  key={query}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => selectHistory(query)}
+                >
+                  <History size={13} /> {query}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="history-empty">暂无搜索历史</div>
+          )}
         </div>
       )}
     </div>

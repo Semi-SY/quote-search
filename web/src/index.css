@@ -145,6 +145,7 @@
   white-space: nowrap;
 }
 .history-list button:hover { color: var(--c-text); border-color: var(--c-accent); background: rgba(255, 121, 92, 0.07); }
+.history-empty { padding: 5px 4px 3px; color: var(--c-text-muted); font-size: 12px; }
 
 /* 首屏 */
 .hero {
@@ -349,6 +350,13 @@
 .film-card-content strong { font-size: 20px; }
 .film-card-content > span:last-child { display: flex; align-items: center; gap: 5px; margin-top: 4px; color: rgba(255,255,255,.67); font-size: 11px; }
 
+/* 独立页面 */
+.page-view { animation: page-enter .28s ease both; }
+.page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 6px 0 26px; padding: 4px 2px 0; }
+.page-heading h1 { margin-top: 5px; font-size: 32px; letter-spacing: -.035em; }
+.page-heading p { margin: 8px 0 0; color: var(--c-text-muted); font-size: 13px; line-height: 1.7; }
+.page-heading .back-home-btn { flex-shrink: 0; min-height: 36px; }
+
 /* 筛选面板 */
 .discovery-panel { margin-bottom: 30px; padding: 23px 25px; border: 1px solid var(--c-border); border-radius: 19px; background: rgba(19, 23, 32, 0.82); }
 .discovery-heading { align-items: center; margin-bottom: 12px; }
@@ -375,6 +383,8 @@
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--c-border); border-radius: var(--r-chip); background: rgba(255,255,255,.025); color: var(--c-text-secondary); font-size: 12px; transition: 0.15s; }
 .chip:hover { color: var(--c-text); border-color: rgba(255, 121, 92, 0.5); }
 .chip.active { color: #fff; border-color: var(--c-accent); background: var(--c-accent); }
+.chip:disabled { opacity: 0.35; cursor: not-allowed; }
+.chip:disabled:hover { color: var(--c-text-secondary); border-color: var(--c-border); }
 .chip-count { opacity: 0.62; font: 10px var(--font-mono); }
 .speaker-select { min-width: 230px; padding: 7px 34px 7px 12px; border: 1px solid var(--c-border); border-radius: 9px; outline: none; background: var(--c-surface-raised); color: var(--c-text-secondary); font-size: 12px; cursor: pointer; }
 .speaker-select:focus { border-color: var(--c-accent); }
@@ -494,6 +504,7 @@
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 24px; border-top: 1px solid var(--c-border); color: var(--c-text-muted); font-size: 11px; }
 .build-info { font-family: var(--font-mono); }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes page-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes dialog-in { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 @media (max-width: 1020px) {
@@ -548,6 +559,9 @@
   .lucky-zh { white-space: normal; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
   .lucky-shuffle { flex: 1; justify-content: center; }
   .section-heading h2 { font-size: 19px; }
+  .page-heading { flex-direction: column; align-items: flex-start; gap: 14px; margin-bottom: 20px; }
+  .page-heading h1 { font-size: 27px; }
+  .page-heading p { font-size: 12px; }
   .discovery-heading { flex-wrap: wrap; }
   .discovery-actions { width: 100%; justify-content: flex-start; }
   .film-cards { grid-template-columns: 1fr; }
@@ -572,4 +586,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  .page-view { animation: none; }
 }

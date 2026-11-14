@@ -34,26 +34,48 @@ def search(
 
 
 @router.get("/episodes")
-def episodes() -> dict:
+def episodes(
+    q: str = Query("", max_length=80),
+    genre: str | None = None,
+    speaker: str | None = None,
+) -> dict:
     if not db.is_ready():
         raise HTTPException(503, "数据库尚未生成")
-    return {"episodes": search_core.get_episodes()}
+    return {"episodes": search_core.get_episodes(q=q, genre=genre, speaker=speaker)}
 
 
 @router.get("/genres")
-def genres() -> dict:
-    """题材分类列表（含每类台词数）。"""
+def genres(
+    q: str = Query("", max_length=80),
+    season: int | None = None,
+    episode: int | None = None,
+    speaker: str | None = None,
+) -> dict:
+    """题材分类列表（含每类台词数，随其他筛选条件变化）。"""
     if not db.is_ready():
         raise HTTPException(503, "数据库尚未生成")
-    return {"genres": search_core.get_genres()}
+    return {
+        "genres": search_core.get_genres(
+            q=q, season=season, episode=episode, speaker=speaker
+        )
+    }
 
 
 @router.get("/speakers")
-def speakers() -> dict:
-    """说话人列表（含每人台词数）。"""
+def speakers(
+    q: str = Query("", max_length=80),
+    season: int | None = None,
+    episode: int | None = None,
+    genre: str | None = None,
+) -> dict:
+    """说话人列表（含每人台词数，随其他筛选条件变化）。"""
     if not db.is_ready():
         raise HTTPException(503, "数据库尚未生成")
-    return {"speakers": search_core.get_speakers()}
+    return {
+        "speakers": search_core.get_speakers(
+            q=q, season=season, episode=episode, genre=genre
+        )
+    }
 
 
 @router.get("/random")

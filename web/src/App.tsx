@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Heart, LayoutGrid, Layers, Sparkles, Play, Captions,
   ArrowUpRight, Users, Shuffle, ArrowLeft, Palette, Dices,
 } from 'lucide-react';
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import SearchBar from './components/SearchBar';
 import QuoteGrid from './components/QuoteGrid';
 import QuoteDetailDialog from './components/QuoteDetailDialog';
@@ -49,23 +50,68 @@ function readLocalArray<T>(key: string): T[] {
   }
 }
 
+function positiveParam(value: string | null): number | undefined {
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return parsed > 0 ? parsed : undefined;
+}
+
 export default function App() {
-  const [q, setQ] = useState('');
-  const [filterEpisode, setFilterEpisode] = useState<{ season: number; episode: number } | null>(null);
-  const [filterGenre, setFilterGenre] = useState<string | null>(null);
-  const [filterSpeaker, setFilterSpeaker] = useState<string | null>(null);
-  const [browseAll, setBrowseAll] = useState(false);
-  const [showFavorites, setShowFavorites] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isHome = location.pathname === '/';
+  const isBrowse = location.pathname === '/browse';
+  const isFavorites = location.pathname === '/favorites';
+  const [searchDraft, setSearchDraft] = useState('');
   const [history, setHistory] = useState<string[]>(() => readLocalArray<string>('quote-search-history'));
   const [favorites, setFavorites] = useState<SearchItem[]>(() => readLocalArray<SearchItem>('quote-search-favorites'));
 
+  const q = isBrowse ? searchParams.get('q') || '' : searchDraft;
+  const query = isBrowse ? q.trim() : '';
+  const filterSeason = isBrowse ? positiveParam(searchParams.get('season')) : undefined;
+  const filterEpisodeNumber = isBrowse ? positiveParam(searchParams.get('episode')) : undefined;
+  const filterEpisode = filterSeason !== undefined && filterEpisodeNumber !== undefined
+    ? { season: filterSeason, episode: filterEpisodeNumber }
+    : null;
+  const filterGenre = isBrowse ? searchParams.get('genre') : null;
+  const filterSpeaker = isBrowse ? searchParams.get('speaker') : null;
+
+  const updateBrowseParams = useCallback((updates: Record<string, string | null>, replace = false) => {
+    const next = new URLSearchParams(searchParams);
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    });
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const setFilterGenre = (genre: string | null) => updateBrowseParams({ genre });
+  const setFilterSpeaker = (speaker: string | null) => updateBrowseParams({ speaker });
+  const setFilterEpisode = (episode: { season: number; episode: number } | null) => {
+    updateBrowseParams({
+      season: episode ? String(episode.season) : null,
+      episode: episode ? String(episode.episode) : null,
+    });
+  };
+
+  const searchKey = isBrowse
+    ? [query, filterSeason, filterEpisodeNumber, filterGenre, filterSpeaker].join('|')
+    : '';
+  const searchKeyRef = useRef(searchKey);
+  useEffect(() => {
+    searchKeyRef.current = searchKey;
+  }, [searchKey]);
+
   const { data, loading, error } = useSearch({
-    q,
-    season: filterEpisode?.season,
-    episode: filterEpisode?.episode,
+    q: query,
+    season: filterSeason,
+    episode: filterEpisodeNumber,
     speaker: filterSpeaker || undefined,
     genre: filterGenre || undefined,
-    browseAll,
+    browseAll: isBrowse,
   });
 
   const [active, setActive] = useState<SearchItem | null>(null);
@@ -83,11 +129,79 @@ export default function App() {
   const [heroIndex, setHeroIndex] = useState(0);
 
   useEffect(() => {
-    fetchEpisodes().then((r) => setEpisodes(r.episodes)).catch(() => {});
-    fetchGenres().then((r) => setGenres(r.genres)).catch(() => {});
-    fetchSpeakers().then((r) => setSpeakers(r.speakers)).catch(() => {});
     fetchFeatured().then((r) => setFeatured(r.items)).catch(() => setFeatured([]));
   }, []);
+
+  // 筛选器联动：素材页按 URL 条件统计，其他页面恢复全量统计。
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      Promise.all([
+        fetchEpisodes({ q: query, genre: filterGenre || undefined, speaker: filterSpeaker || undefined }),
+        fetchGenres({
+          q: query,
+          season: filterSeason,
+          episode: filterEpisodeNumber,
+          speaker: filterSpeaker || undefined,
+        }),
+        fetchSpeakers({
+          q: query,
+          season: filterSeason,
+          episode: filterEpisodeNumber,
+          genre: filterGenre || undefined,
+        }),
+      ]).then(([episodeData, genreData, speakerData]) => {
+        if (cancelled) return;
+        setEpisodes(episodeData.episodes);
+        setGenres(genreData.genres);
+        setSpeakers(speakerData.speakers);
+        if (!isBrowse) return;
+
+        const invalid: Record<string, string | null> = {};
+        if (filterGenre && genreData.genres.length > 0
+          && !genreData.genres.some((g) => g.genre === filterGenre && g.line_count > 0)) {
+          invalid.genre = null;
+        }
+        if (filterSpeaker && speakerData.speakers.length > 0
+          && !speakerData.speakers.some((s) => s.speaker === filterSpeaker && s.line_count > 0)) {
+          invalid.speaker = null;
+        }
+        if (filterSeason !== undefined && filterEpisodeNumber !== undefined && episodeData.episodes.length > 0
+          && !episodeData.episodes.some((e) => e.season === filterSeason
+            && e.episode === filterEpisodeNumber && e.line_count > 0)) {
+          invalid.season = null;
+          invalid.episode = null;
+        }
+        if (Object.keys(invalid).length > 0) updateBrowseParams(invalid, true);
+      }).catch(() => {});
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isBrowse, query, filterSeason, filterEpisodeNumber, filterGenre, filterSpeaker, updateBrowseParams]);
+
+  // 清理直接访问 URL 时的空参数与无效影片参数。
+  useEffect(() => {
+    if (!isBrowse) return;
+    const updates: Record<string, string | null> = {};
+    ['q', 'genre', 'speaker'].forEach((key) => {
+      if (searchParams.get(key) === '') updates[key] = null;
+    });
+    if ((searchParams.has('season') || searchParams.has('episode'))
+      && (filterSeason === undefined || filterEpisodeNumber === undefined)) {
+      updates.season = null;
+      updates.episode = null;
+    }
+    if (Object.keys(updates).length > 0) updateBrowseParams(updates, true);
+  }, [isBrowse, searchParams, filterSeason, filterEpisodeNumber, updateBrowseParams]);
+
+  useEffect(() => {
+    setActive(null);
+    document.title = isBrowse
+      ? '浏览素材 · 拾句放映室'
+      : isFavorites ? '我的收藏 · 拾句放映室' : '拾句放映室 · Pickup Reel';
+  }, [location.pathname, isBrowse, isFavorites]);
 
   useEffect(() => {
     try { localStorage.setItem('quote-search-history', JSON.stringify(history)); } catch { /* 本机存储不可用时仅保留当前会话 */ }
@@ -96,6 +210,13 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem('quote-search-favorites', JSON.stringify(favorites)); } catch { /* 本机存储不可用时仅保留当前会话 */ }
   }, [favorites]);
+
+  useEffect(() => {
+    setAllItems([]);
+    setPage(1);
+    setHasMore(false);
+    setLoadingMore(false);
+  }, [searchKey]);
 
   useEffect(() => {
     if (data) {
@@ -150,25 +271,28 @@ export default function App() {
   }, [heroItems.length]);
 
   const loadMore = useCallback(async () => {
-    if (!data || loadingMore) return;
+    if (!data || loading || loadingMore || !isBrowse) return;
+    const requestKey = searchKey;
     setLoadingMore(true);
     try {
       const next = page + 1;
-      const res = await search(q, {
-        season: filterEpisode?.season,
-        episode: filterEpisode?.episode,
+      const res = await search(query, {
+        season: filterSeason,
+        episode: filterEpisodeNumber,
         speaker: filterSpeaker || undefined,
         genre: filterGenre || undefined,
         page: next,
         size: 20,
       });
+      if (searchKeyRef.current !== requestKey) return;
       setAllItems((prev) => [...prev, ...res.items]);
       setPage(next);
       setHasMore(next * res.size < res.total);
     } finally {
-      setLoadingMore(false);
+      if (searchKeyRef.current === requestKey) setLoadingMore(false);
     }
-  }, [data, page, q, filterEpisode, filterSpeaker, filterGenre, loadingMore]);
+  }, [data, page, query, filterSeason, filterEpisodeNumber, filterSpeaker, filterGenre,
+    loading, loadingMore, isBrowse, searchKey]);
 
   const epLabel = (ep: Episode) =>
     ep.title_en || ep.title_zh || `S${String(ep.season).padStart(2, '0')}E${String(ep.episode).padStart(2, '0')}`;
@@ -190,43 +314,46 @@ export default function App() {
   }, []);
 
   const handleQueryChange = (value: string) => {
-    setQ(value);
-    setShowFavorites(false);
+    if (isBrowse) updateBrowseParams({ q: value || null }, true);
+    else setSearchDraft(value);
   };
 
   const submitSearch = (value: string) => {
-    const query = value.trim();
-    setQ(query);
-    setShowFavorites(false);
-    if (query) {
-      setHistory((prev) => [query, ...prev.filter((item) => item !== query)].slice(0, 8));
+    const nextQuery = value.trim();
+    if (nextQuery) {
+      setHistory((prev) => [nextQuery, ...prev.filter((item) => item !== nextQuery)].slice(0, 8));
     }
-  };
-
-  const clearFilters = () => {
-    setQ('');
-    setFilterEpisode(null);
-    setFilterGenre(null);
-    setFilterSpeaker(null);
+    if (isBrowse) {
+      updateBrowseParams({ q: nextQuery || null }, true);
+      return;
+    }
+    setSearchDraft(nextQuery);
+    const params = nextQuery ? `?q=${encodeURIComponent(nextQuery)}` : '';
+    navigate(`/browse${params}`);
   };
 
   const goHome = () => {
-    setShowFavorites(false);
-    setBrowseAll(false);
-    clearFilters();
+    setSearchDraft('');
+    if (!isHome) navigate('/');
   };
 
   const enterBrowse = (episode?: Episode) => {
-    setShowFavorites(false);
-    setBrowseAll(true);
-    setQ('');
-    setFilterGenre(null);
-    setFilterSpeaker(null);
-    setFilterEpisode(episode ? { season: episode.season, episode: episode.episode } : null);
+    setSearchDraft('');
+    const params = new URLSearchParams();
+    if (episode) {
+      params.set('season', String(episode.season));
+      params.set('episode', String(episode.episode));
+    }
+    const queryString = params.toString();
+    navigate(`/browse${queryString ? `?${queryString}` : ''}`);
   };
 
-  const searchData = data ? { ...data, items: allItems } : null;
-  const showFeatured = !showFavorites && !browseAll && !q.trim() && !filterEpisode && !filterGenre && !filterSpeaker;
+  const enterFavorites = () => {
+    setSearchDraft('');
+    if (!isFavorites) navigate('/favorites');
+  };
+
+  const searchData = isBrowse && data ? { ...data, items: allItems } : null;
   const favoritesData = {
     query: '', total: favorites.length, page: 1, size: favorites.length,
     took_ms: 0, items: favorites,
@@ -272,11 +399,11 @@ export default function App() {
             <Palette size={17} />
           </button>
           <button
-            className={`header-favorites ${showFavorites ? 'active' : ''}`}
-            onClick={() => setShowFavorites((value) => !value)}
-            aria-pressed={showFavorites}
+            className={`header-favorites ${isFavorites ? 'active' : ''}`}
+            onClick={enterFavorites}
+            aria-pressed={isFavorites}
           >
-            <Heart size={17} fill={showFavorites ? 'currentColor' : 'none'} />
+            <Heart size={17} fill={isFavorites ? 'currentColor' : 'none'} />
             <span>收藏</span>
             <span className="favorite-count">{favorites.length}</span>
           </button>
@@ -284,8 +411,9 @@ export default function App() {
       </header>
 
       <main className="main">
-        <div className="container">
-          {showFeatured && (
+        <div className="container page-view" key={location.pathname}>
+          {!isHome && !isBrowse && !isFavorites && <Navigate to="/" replace />}
+          {isHome && (
             <>
               <section className="hero">
                 <div className="hero-copy">
@@ -296,7 +424,7 @@ export default function App() {
                     <button className="browse-all-btn" onClick={() => enterBrowse()}>
                       <Layers size={17} /> 浏览全部素材 <ArrowUpRight size={16} />
                     </button>
-                    <button className="hero-secondary-btn" onClick={() => setShowFavorites(true)}>
+                    <button className="hero-secondary-btn" onClick={enterFavorites}>
                       <Heart size={16} /> 我的收藏
                     </button>
                   </div>
@@ -420,17 +548,36 @@ export default function App() {
             </>
           )}
 
-          {!showFavorites && (
+          {isBrowse && (
+            <div className="page-heading">
+              <div>
+                <span className="section-kicker">EXPLORE THE LIBRARY</span>
+                <h1>浏览台词素材</h1>
+                <p>按影片、题材和说话人组合筛选，找到可以直接使用的电影片段。</p>
+              </div>
+              <button className="back-home-btn" onClick={goHome}>
+                <ArrowLeft size={14} /> 返回首页
+              </button>
+            </div>
+          )}
+
+          {isFavorites && (
+            <div className="page-heading">
+              <div>
+                <span className="section-kicker">YOUR COLLECTION</span>
+                <h1>我的台词收藏</h1>
+                <p>收藏保存在当前浏览器中，随时可以回来继续剪辑。</p>
+              </div>
+              <button className="back-home-btn" onClick={() => enterBrowse()}>
+                <LayoutGrid size={14} /> 返回素材库
+              </button>
+            </div>
+          )}
+
+          {isBrowse && (
             <section className="discovery-panel">
               <div className="discovery-heading">
-                <div><span className="section-kicker">FIND YOUR SCENE</span><h2>{showFeatured ? '按条件精准筛选' : '筛选台词素材'}</h2></div>
-                <div className="discovery-actions">
-                  {!showFeatured && (
-                    <button className="back-home-btn" onClick={goHome}>
-                      <ArrowLeft size={14} /> 返回首页
-                    </button>
-                  )}
-                </div>
+                <div><span className="section-kicker">FIND YOUR SCENE</span><h2>按条件精准筛选</h2></div>
               </div>
 
               {genres.length > 0 && (
@@ -442,6 +589,7 @@ export default function App() {
                       <button
                         key={genre.genre}
                         className={`chip ${filterGenre === genre.genre ? 'active' : ''}`}
+                        disabled={genre.line_count === 0 && filterGenre !== genre.genre}
                         onClick={() => setFilterGenre(filterGenre === genre.genre ? null : genre.genre)}
                       >
                         {genreLabel(genre.genre)} <span className="chip-count">{genre.line_count}</span>
@@ -463,6 +611,7 @@ export default function App() {
                       <button
                         key={`${ep.season}-${ep.episode}`}
                         className={`chip ${selected ? 'active' : ''}`}
+                        disabled={ep.line_count === 0 && !selected}
                         onClick={() => setFilterEpisode(selected ? null : { season: ep.season, episode: ep.episode })}
                       >
                         {epLabel(ep)} <span className="chip-count">{ep.line_count}</span>
@@ -483,7 +632,11 @@ export default function App() {
                   >
                     <option value="">全部说话人</option>
                     {speakers.map((speaker) => (
-                      <option key={speaker.speaker} value={speaker.speaker}>
+                      <option
+                        key={speaker.speaker}
+                        value={speaker.speaker}
+                        disabled={speaker.line_count === 0 && filterSpeaker !== speaker.speaker}
+                      >
                         {speaker.speaker}（{speaker.line_count} 条）
                       </option>
                     ))}
@@ -493,24 +646,18 @@ export default function App() {
             </section>
           )}
 
-          <section className={`quotes-section ${showFavorites ? 'favorites-section' : ''}`}>
-            {showFavorites && (
-              <div className="section-heading favorites-heading">
-                <div><span className="section-kicker">YOUR COLLECTION</span><h2>我的台词收藏</h2></div>
-                <button onClick={() => setShowFavorites(false)}>返回素材库 <ArrowUpRight size={15} /></button>
-              </div>
-            )}
+          <section className={`quotes-section ${isFavorites ? 'favorites-section' : ''}`}>
             <QuoteGrid
-              response={showFavorites ? favoritesData : searchData}
-              loading={showFavorites ? false : loading}
-              error={showFavorites ? null : error}
+              response={isFavorites ? favoritesData : isBrowse ? searchData : null}
+              loading={isBrowse ? loading : false}
+              error={isBrowse ? error : null}
               featured={featured}
               favoriteIds={favoriteIds}
               onToggleFavorite={toggleFavorite}
-              isFavoritesView={showFavorites}
-              sectionTitle={showFavorites ? `已收藏 ${favorites.length} 条台词` : undefined}
-              hasMore={hasMore}
-              loadingMore={loadingMore}
+              isFavoritesView={isFavorites}
+              sectionTitle={isFavorites ? `已收藏 ${favorites.length} 条台词` : undefined}
+              hasMore={isBrowse && hasMore}
+              loadingMore={isBrowse && loadingMore}
               onLoadMore={loadMore}
               onCardClick={setActive}
             />

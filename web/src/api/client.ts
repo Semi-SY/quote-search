@@ -102,16 +102,35 @@ export function search(
   return apiGet<SearchResponse>(`/api/search?${sp.toString()}`);
 }
 
-export function fetchEpisodes(): Promise<{ episodes: Episode[] }> {
-  return apiGet<{ episodes: Episode[] }>('/api/episodes');
+export interface FacetParams {
+  q?: string;
+  season?: number;
+  episode?: number;
+  genre?: string;
+  speaker?: string;
 }
 
-export function fetchGenres(): Promise<{ genres: Genre[] }> {
-  return apiGet<{ genres: Genre[] }>('/api/genres');
+function facetQuery(params: FacetParams): string {
+  const sp = new URLSearchParams();
+  if (params.q && params.q.trim()) sp.set('q', params.q.trim());
+  if (params.season !== undefined) sp.set('season', String(params.season));
+  if (params.episode !== undefined) sp.set('episode', String(params.episode));
+  if (params.genre) sp.set('genre', params.genre);
+  if (params.speaker) sp.set('speaker', params.speaker);
+  const qs = sp.toString();
+  return qs ? `?${qs}` : '';
 }
 
-export function fetchSpeakers(): Promise<{ speakers: Speaker[] }> {
-  return apiGet<{ speakers: Speaker[] }>('/api/speakers');
+export function fetchEpisodes(params: FacetParams = {}): Promise<{ episodes: Episode[] }> {
+  return apiGet<{ episodes: Episode[] }>(`/api/episodes${facetQuery(params)}`);
+}
+
+export function fetchGenres(params: FacetParams = {}): Promise<{ genres: Genre[] }> {
+  return apiGet<{ genres: Genre[] }>(`/api/genres${facetQuery(params)}`);
+}
+
+export function fetchSpeakers(params: FacetParams = {}): Promise<{ speakers: Speaker[] }> {
+  return apiGet<{ speakers: Speaker[] }>(`/api/speakers${facetQuery(params)}`);
 }
 
 export function fetchFeatured(): Promise<{ items: SearchItem[] }> {
