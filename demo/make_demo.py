@@ -363,16 +363,16 @@ def action_context(page):
     # 打开第一张卡片，聚焦上下句
     page.click(".quotes-section .card:first-child")
     page.wait_for_timeout(700)
-    zoom_to(page, ".ctx-nav", scale=2.0)
+    zoom_to(page, ".context-nav", scale=2.0)
     page.wait_for_timeout(400)
     # 上一句 / 下一句
     try:
-        page.click(".ctx-prev")
+        page.locator(".ctx-nav-btn").first.click()
         page.wait_for_timeout(700)
     except Exception:
         pass
     try:
-        page.click(".ctx-next")
+        page.locator(".ctx-nav-btn").last.click()
         page.wait_for_timeout(800)
     except Exception:
         pass
