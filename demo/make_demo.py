@@ -221,10 +221,11 @@ ZOOM_CSS = """
 
 def inject_zoom(page):
     page.add_style_tag(content=ZOOM_CSS)
-    # 给最外层包一层可缩放容器
+    # 给最外层包一层可缩放容器（幂等）
     page.evaluate("""() => {
       const shell = document.querySelector('.app-shell');
       if (!shell) return;
+      if (shell.parentElement && shell.parentElement.id === 'zoom-root') return;
       const wrap = document.createElement('div');
       wrap.id = 'zoom-root';
       shell.parentNode.insertBefore(wrap, shell);
@@ -266,6 +267,7 @@ def zoom_out(page):
 # ---------------------------------------------------------------------------
 def action_intro(page):
     page.goto(APP_URL, wait_until="networkidle")
+    inject_zoom(page)
     page.wait_for_timeout(900)
     # 聚焦 logo
     zoom_to(page, ".brand", scale=1.6)
@@ -340,6 +342,10 @@ def action_favorite(page):
 
 
 def action_random(page):
+    # 回到首页（随机按钮在首页）
+    page.goto(APP_URL, wait_until="networkidle")
+    inject_zoom(page)
+    page.wait_for_timeout(600)
     zoom_to(page, ".lucky-shuffle", scale=2.0)
     page.wait_for_timeout(400)
     page.click(".lucky-shuffle")
@@ -360,7 +366,10 @@ def action_mood(page):
 
 
 def action_context(page):
-    # 打开第一张卡片，聚焦上下句
+    # 打开素材页第一张卡片，聚焦上下句
+    page.goto(APP_URL + "/browse", wait_until="networkidle")
+    inject_zoom(page)
+    page.wait_for_timeout(800)
     page.click(".quotes-section .card:first-child")
     page.wait_for_timeout(700)
     zoom_to(page, ".context-nav", scale=2.0)
@@ -406,7 +415,7 @@ ACTIONS = {
 def record_video(segments: list[dict], closing_html: Path, total_audio: float) -> Path:
     raw = ASSET_DIR / "raw_record.webm"
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        browser = p.chromium.launch(headless=True, channel="chrome", args=["--no-sandbox", "--headless=new"])
         context = browser.new_context(
             viewport={"width": WIDTH, "height": HEIGHT},
             device_scale_factor=1,
